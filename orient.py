@@ -1,5 +1,5 @@
-import os
 import struct
+from stl.mesh import Mesh
 
 
 class TakeFile:
@@ -8,21 +8,8 @@ class TakeFile:
         return None
 
     def load(self, file):
-        file_format = os.path.splitext(file)[1].lower()
-        content = []
-        if file_format.lower() == ".stl":
-            if "solid" in str(file.read(5).lower()):
-                file = open(file, "r")
-                content = [{"Mesh": self.load_binary_stl(file)}]
-                if len(content[0]["Mesh"]) < 3:
-                    file.seek(5, os.SEEK_SET)
-                    content = [{"Mesh": self.load_binary_stl(file)}]
-            else:
-                content = [{"Mesh": self.load_binary_stl(file)}]
-        else:
-            print("File type not supported. Please select '.stl' files only")
-
-        return content
+        mesh = Mesh.from_file(file)
+        return mesh
 
     @staticmethod
     def load_ascii_stl(file):
