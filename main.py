@@ -1,7 +1,6 @@
 import orient
 import vtkplotlib as vpl
-
-# from stl.mesh import Mesh
+from orient import Tweak
 
 if __name__ == "__main__":
     message = "Choose one of these files:" \
@@ -20,8 +19,20 @@ if __name__ == "__main__":
              "Resources/models/test4.stl"]
     file = files[int(k) - 1]
     orient = orient.TakeFile()
-    objects = orient.load(file)
+    objects = orient.loadMesh(file)
 
+    for obj in objects:
+        mesh = obj["Mesh"]
+        x = Tweak(mesh)
+        r = x.r
+        print(f'Value of R is {r}')
+        tweaked = orient.rotate_mesh(r, mesh)
+        with open("a.stl", 'w') as out:
+            out.write(tweaked)
+    optimised = orient.load("a.stl")
+    original = orient.load(file)
     fig = vpl.figure()
-    mesh = vpl.mesh_plot(objects)
+    mesh1 = vpl.mesh_plot(optimised, color="green")
+    mesh2 = vpl.mesh_plot(original, color="red", opacity=0.3)
+    vpl.view(camera_position=[0, 100, 0])
     vpl.show()
