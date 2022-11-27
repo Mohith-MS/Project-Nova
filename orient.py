@@ -1,11 +1,10 @@
 import sys
 import time
 import math
-import itertools
 from collections import Counter
-import random
 import os
 import struct
+import numpy as np
 # noinspection PyPackageRequirements
 from stl.mesh import Mesh
 
@@ -112,213 +111,254 @@ class TakeFile:
 
 
 class Tweak:
-    def __init__(self, mesh, critical_angle=None):
-        if critical_angle is None:
-            critical_angle = 45
-        content = self.arrange_mesh(mesh)
-        amin = self.approach_first_vertex(content)
-        bottom_a, overhang_a, line_l = self.lithograph(content=content, n=[0.0, 0.0, 1.0], amin=amin,
-                                                       critical_angle=critical_angle)
-        list_e = [[[0.0, 0.0, 1.0], bottom_a, overhang_a, line_l]]
-        orientations = self.area_cumulation(content)
+    def __init__(self, mesh):
+        self.OV_H = 1
+        self.NEGL_FACE_SIZE = 0.4928696161029859
+        self.TAR_A = 0.023251193283878126
+        self.TAR_B = 0.17967732044591803
+        self.RELATIVE_F = 11.250931864115714
+        self.CONTOUR_F = 0.219523237806102
+        self.BOTTOM_F = 0.219523237806102
+        self.TAR_C = -0.016564249433447253
+        self.TAR_D = 1.0592490333488807
+        self.TAR_E = 0.011503545133447014
+        self.FIRST_LAY_H = 0.04754881938390257
+        self.VECTOR_TOL = -0.0008385913582234466
+        self.ASCENT = -0.07809801382985776
+        self.PLAFOND_ADV = 0.059937025927212395
+        self.CONTOUR_AMOUNT = 0.018242751444131886
+        self.height_offset = 2.574100894603089
+        self.height_log = 0.04137517666768212
+        self.height_log_k = 1.9325457851679673
 
+        z_axis = -np.array([0, 0, 1], dtype=np.float64)
+        orientations = [[z_axis, 0.0]]
+
+        self.mesh = self.preprocess(content=mesh)
+        orientations += self.area_cumulation(10)
+        orientations += self.death_star(12)
+        orientations += self.add_supplements()
+        orientations = self.remove_duplicates(orientations)
+
+        results = list()
         for side in orientations:
-            orientation = [float("{:6f}".format(-i)) for i in side[0]]
-            amin = self.approach_vertex(content, orientation)
-            bottom_a, overhang_a, line_l = self.lithograph(content, orientation, amin, critical_angle)
-            list_e.append([orientation, bottom_a, overhang_a, line_l])
+            orientation = -1 * np.array(side[0], dtype=np.float64)
 
-        unprintablility = sys.maxsize
-        best_side = 0
-        for orientation, bottom_a, overhang_a, line_l in list_e:
-            f = self.target_function(bottom_a, overhang_a, line_l)
-            if f < unprintablility - 0.05:
-                unprintablility = f
-                best_side = [orientation, bottom_a, overhang_a, line_l]
+            self.project_vertices(orientation)
+            bottom, overhang, contour = self.calc_overhang(orientation)
+            unprintability = self.target_function(bottom, overhang, contour)
+            results.append([orientation, bottom, overhang, contour, unprintability])
 
-        if best_side:
-            [self.v, self.phi, self.r] = self.euler(best_side)
+        del self.mesh
 
-        self.unprintablility = unprintablility
-        self.zn = best_side
+        results = np.array(results)
+        best_results = list(results[results[:, 4].argsort()])
 
-    @staticmethod
-    def target_function(touching, overhang, line):
-        abs_limit = 100
-        re_limit = 1
-        line_factor = 0.5
-        touching_line = line * line_factor
-        f = (overhang / abs_limit) + (overhang / (touching + touching_line) / re_limit)
-        ret = float("{:f}".format(f))
-        return ret
+        for i, align in enumerate(best_results):
+            best_results[i] = list(best_results[i])
+            v, phi, matrix = self.euler(align)
+            best_results[i].append([[v[0], v[1], v[2]], phi, matrix])
 
-    @staticmethod
-    def arrange_mesh(mesh):
-        face = []
-        content = []
-        i = 0
-        for li in mesh:
-            face.append(li)
-            i += 1
-            if i % 3 == 0:
-                v = [face[1][0] - face[0][0], face[1][1] - face[0][1], face[1][2] - face[0][2]]
-                w = [face[2][0] - face[0][0], face[2][1] - face[0][1], face[2][2] - face[0][2]]
-                a = [round(v[1] * w[2] - v[2] * w[1], 6), round(v[2] * w[0] - v[0] * w[2], 6),
-                     round(v[0] * w[1] - v[1] * w[0], 6)]
-                content.append([a, face[0], face[1], face[2]])
-                face = []
-            time.sleep(0)
-        return content
+        if len(best_results) > 0:
+            self.euler_parameter = best_results[0][5][:2]
+            self.r = best_results[0][5][2]
+            self.alignment = best_results[0][0]
+            self.bottom_area = best_results[0][1]
+            self.overhang_area = best_results[0][2]
+            self.contour = best_results[0][3]
+            self.unprintability = best_results[0][4]
+            self.best_5 = best_results
 
-    @staticmethod
-    def approach_first_vertex(content):
-        amin = sys.maxsize
-        for li in content:
-            z = min([li[1][2], li[2][2], li[3][2]])
-            if z < amin:
-                amin = z
-            time.sleep(0)
-        return amin
+    def project_vertices(self, orientation):
+        self.mesh[:, 4, 0] = np.inner(self.mesh[:, 1, :], orientation)
+        self.mesh[:, 4, 1] = np.inner(self.mesh[:, 2, :], orientation)
+        self.mesh[:, 4, 2] = np.inner(self.mesh[:, 3, :], orientation)
 
-    @staticmethod
-    def approach_vertex(content, n):
-        amin = sys.maxsize
-        for li in content:
-            a1 = li[1][0] * n[0] + li[1][1] * n[1] + li[1][2] * n[2]
-            a2 = li[2][0] * n[0] + li[2][1] * n[1] + li[2][2] * n[2]
-            a3 = li[3][0] * n[0] + li[3][1] * n[1] + li[3][2] * n[2]
-            an = min([a1, a2, a3])
-            if an < amin:
-                amin = an
-            time.sleep(0)
-        return amin
+        self.mesh[:, 5, 1] = np.max(self.mesh[:, 4, :], axis=1)
+        self.mesh[:, 5, 2] = np.median(self.mesh[:, 4, :], axis=1)
+        time.sleep(0)
 
-    def lithograph(self, content, n, amin, critical_angle):
-        overhang = 1
-        alpha = -math.cos((90 - critical_angle) * math.pi / 180)
-        bottom_a = 1
-        line_l = 1
-        touching_height = amin + 0.15
+    def calc_overhang(self, orientation):
+        total_min = np.amin(self.mesh[:, 4, :])
 
-        anti_n = [float(-i) for i in n]
+        bottom = np.sum(self.mesh[np.where(self.mesh[:, 5, 1] < total_min + self.FIRST_LAY_H), 5, 0])
 
-        for li in content:
-            time.sleep(0)
-            a = li[0]
-            norma = math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
-            if norma < 2:
-                continue
-            if alpha > (a[0] * n[0] + a[1] * n[1] + a[2] * n[2]) / norma:
-                a1 = li[1][0] * n[0] + li[1][1] * n[1] + li[1][2] * n[2]
-                a2 = li[2][0] * n[0] + li[2][1] * n[1] + li[2][2] * n[2]
-                a3 = li[3][0] * n[0] + li[3][1] * n[1] + li[3][2] * n[2]
-                an = min([a1, a2, a3])
+        overhangs = self.mesh[np.where(np.inner(self.mesh[:, 0, :], orientation) < self.ASCENT)]
+        overhangs = overhangs[np.where(overhangs[:, 5, 1] > (total_min + self.FIRST_LAY_H))]
 
-                ali = float("{:1.4f}".format(abs(li[0][0] * n[0] + li[0][1] * n[1] + li[0][2] * n[2]) / 2))
-                if touching_height < an:
-                    if 0.00001 < math.fabs(a[0] - anti_n[0]) + math.fabs(a[1] - anti_n[1]) + math.fabs(
-                            a[2] - anti_n[2]):
-                        ali = 0.8 * ali
-                    overhang += ali
-                else:
-                    bottom_a += ali
-                    line_l += self.get_touching_line([a1, a2, a3], li, touching_height)
-                time.sleep(0)
-        return bottom_a, overhang, line_l
+        plafond = np.sum(overhangs[(overhangs[:, 0, :] == -orientation).all(axis=1), 5, 0])
 
-    @staticmethod
-    def get_touching_line(a, li, touching_height):
-        touch_lst = list()
-        for i in range(3):
-            if a[i] < touching_height:
-                touch_lst.append(li[1 + i])
-        combs = list(itertools.combinations(touch_lst, 2))
-        if len(combs) <= 1:
-            return 0
-        length = 0
-        for p1, p2 in combs:
-            time.sleep(0)
-            length += math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2
-                                + (p2[2] - p1[2]) ** 2)
-        return length
+        if len(overhangs) > 0:
 
-    @staticmethod
-    def area_cumulation(content):
-        best_n = 5
+            heights = np.inner(overhangs[:, 1:4, :].mean(axis=1), orientation) - total_min
+
+            inner = np.inner(overhangs[:, 0, :], orientation) - self.ASCENT
+            overhang = np.sum((self.height_offset + self.height_log * np.log(self.height_log_k * heights + 1)) *
+                              overhangs[:, 5, 0] * np.abs(inner * (inner < 0)) ** self.OV_H)
+
+            overhang -= self.PLAFOND_ADV * plafond
+
+        else:
+            overhang = 0
+
+        contours = self.mesh[np.where(self.mesh[:, 5, 2] < total_min + self.FIRST_LAY_H)]
+
+        if len(contours) > 0:
+            conlen = np.arange(len(contours))
+            sortsc0 = np.argsort(contours[:, 4, :], axis=1)[:, 0]
+            sortsc1 = np.argsort(contours[:, 4, :], axis=1)[:, 1]
+
+            con = np.array([np.subtract(
+                contours[conlen, 1 + sortsc0, :],
+                contours[conlen, 1 + sortsc1, :])])
+
+            contours = np.sum(np.power(con, 2), axis=-1) ** 0.5
+            contour = np.sum(contours) + self.CONTOUR_AMOUNT * len(contours)
+        else:
+            contour = 0
+
+        time.sleep(0)
+        return bottom, overhang, contour
+
+    def target_function(self, bottom, overhang, contour):
+        overhang /= 25
+        return (self.TAR_A * (overhang + self.TAR_B) + self.RELATIVE_F * (overhang + self.TAR_C) /
+                (self.TAR_D + self.CONTOUR_F * contour + self.BOTTOM_F * bottom + self.TAR_E * overhang))
+
+    def preprocess(self, content):
+        mesh = np.array(content, dtype=np.float64)
+        if mesh.shape[1] == 3:
+            row_number = int(len(content) / 3)
+            mesh = mesh.reshape(row_number, 3, 3)
+            v0 = mesh[:, 0, :]
+            v1 = mesh[:, 1, :]
+            v2 = mesh[:, 2, :]
+            normals = np.cross(np.subtract(v1, v0), np.subtract(v2, v0)).reshape(row_number, 1, 3)
+            mesh = np.hstack((normals, mesh))
+
+        face_count = mesh.shape[0]
+
+        addendum = np.zeros((face_count, 2, 3))
+        addendum[:, 0, 0] = mesh[:, 1, 2]
+        addendum[:, 0, 1] = mesh[:, 2, 2]
+        addendum[:, 0, 2] = mesh[:, 3, 2]
+
+        addendum[:, 1, 0] = np.sqrt(np.sum(np.square(mesh[:, 0, :]), axis=-1)).reshape(face_count)
+        addendum[:, 1, 1] = np.max(mesh[:, 1:4, 2], axis=1)
+        addendum[:, 1, 2] = np.median(mesh[:, 1:4, 2], axis=1)
+        mesh = np.hstack((mesh, addendum))
+
+        mesh = mesh[mesh[:, 5, 0] != 0]
+        face_count = mesh.shape[0]
+
+        mesh[:, 0, :] = mesh[:, 0, :] / mesh[:, 5, 0].reshape(face_count, 1)
+        mesh[:, 5, 0] = mesh[:, 5, 0] / 2
+
+        if self.NEGL_FACE_SIZE > 0:
+            negl_size = [0.1 * x if True else x for x in [self.NEGL_FACE_SIZE]][0]
+            filtered_mesh = mesh[np.where(mesh[:, 5, 0] > negl_size)]
+            if len(filtered_mesh) > 100:
+                mesh = filtered_mesh
+
+        time.sleep(0)
+        return mesh
+
+    def area_cumulation(self, best_n):
+        alignments = self.mesh[:, 0, :]
         orient = Counter()
-        for li in content:
-            an = li[0]
-            a = math.sqrt(an[0] * an[0] + an[1] * an[1] + an[2] * an[2])
-
-            if a > 0:
-                an = [float("{:1.6f}".format(i / a, 6)) for i in an]
-                orient[tuple(an)] += a
-
-        time.sleep(0)
-        top_n = orient.most_common(best_n)
-        return [[[0.0, 0.0, 1.0], 0.0]] + [[list(el[0]), float("{:2f}".format(el[1]))] for el in top_n]
-
-    @staticmethod
-    def edge_plus_vertex(self, mesh, best_n):
-        v_count = len(mesh)
-        if v_count < 10000:
-            it = 5
-        elif v_count < 25000:
-            it = 2
-        else:
-            it = 1
-        self.mesh = mesh
-        lst = map(self.calc_random_normal, list(range(v_count)) * it)
-        lst = filter(lambda x: x is not None, lst)
-
-        time.sleep(0)
-        orient = Counter(lst)
+        for index in range(len(self.mesh)):
+            orient[tuple(alignments[index])] += self.mesh[index, 5, 0]
 
         top_n = orient.most_common(best_n)
-        top_n = filter(lambda x: x[1] > 2, top_n)
+        time.sleep(0)
+        return top_n
 
-        return [[list(el[0]), el[1]] for el in top_n]
+    def death_star(self, best_n):
+        mesh_len = len(self.mesh)
+        iterations = int(np.ceil(20000 / (mesh_len + 100)))
 
-    def calc_random_normal(self, i):
-        if i % 3 == 0:
-            v = self.mesh[i]
-            w = self.mesh[i + 1]
-        elif i % 3 == 1:
-            v = self.mesh[i]
-            w = self.mesh[i + 1]
-        else:
-            v = self.mesh[i]
-            w = self.mesh[i - 2]
-        r_v = random.choice(self.mesh)
-        v = [v[0] - r_v[0], v[1] - r_v[1], v[2] - r_v[2]]
-        w = [w[0] - r_v[0], w[1] - r_v[1], w[2] - r_v[2]]
-        a = [v[1] * w[2] - v[2] * w[1], v[2] * w[0] - v[0] * w[2], v[0] * w[1] - v[1] * w[0]]
-        n = math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
-        if n != 0:
-            return tuple([round(d / n, 6) for d in a])
+        vertexes = self.mesh[:mesh_len, 1:4, :]
+        tot_normalized_orientations = np.zeros((iterations * mesh_len + 1, 3))
+        for i in range(iterations):
+            two_vertexes = vertexes[:, np.random.choice(3, 2, replace=False)]
+            vertex_0 = two_vertexes[:, 0, :]
+            vertex_1 = two_vertexes[:, 1, :]
+
+            vertex_2 = vertexes[(np.arange(mesh_len) * 127 + 8191 + i) % mesh_len, i % 3, :]
+            normals = np.cross(np.subtract(vertex_2, vertex_0),
+                               np.subtract(vertex_1, vertex_0))
+
+            lengths = np.sqrt((normals * normals).sum(axis=1)).reshape(mesh_len, 1)
+
+            with np.errstate(divide='ignore', invalid='ignore'):
+                normalized_orientations = np.around(np.true_divide(normals, lengths),
+                                                    decimals=6)
+
+            tot_normalized_orientations[mesh_len * i:mesh_len * (i + 1)] = normalized_orientations
+            time.sleep(0)
+
+        orientations = np.inner(np.array([1, 1e3, 1e6]), tot_normalized_orientations)
+        orient = Counter(orientations)
+        top_n = orient.most_common(best_n)
+        top_n = list(filter(lambda x: x[1] > 2, top_n))
+
+        candidate = list()
+        for sum_side, count in top_n:
+            face_unique, face_count = np.unique(tot_normalized_orientations[orientations == sum_side], axis=0,
+                                                return_counts=True)
+            candidate += [[list(face_unique[i]), count] for i, count in enumerate(face_count)]
+
+        candidate = list(filter(lambda x: x[1] >= 2, candidate))
+
+        candidate += [[list((-v[0][0], -v[0][1], -v[0][2])), v[1]] for v in candidate]
+        return candidate
 
     @staticmethod
-    def euler(best_side):
-        if best_side[0] == [0, 0, -1]:
-            v = [1, 0, 0]
-            phi = math.pi
-        elif best_side[0] == [0, 0, 1]:
-            v = [1, 0, 0]
+    def add_supplements():
+        v = [[0, 0, -1], [0.70710678, 0, -0.70710678], [0, 0.70710678, -0.70710678],
+             [-0.70710678, 0, -0.70710678], [0, -0.70710678, -0.70710678],
+             [1, 0, 0], [0.70710678, 0.70710678, 0], [0, 1, 0], [-0.70710678, 0.70710678, 0],
+             [-1, 0, 0], [-0.70710678, -0.70710678, 0], [0, -1, 0], [0.70710678, -0.70710678, 0],
+             [0.70710678, 0, 0.70710678], [0, 0.70710678, 0.70710678],
+             [-0.70710678, 0, 0.70710678], [0, -0.70710678, 0.70710678], [0, 0, 1]]
+        v = [[list([float(j) for j in i]), 0] for i in v]
+        return v
+
+    def euler(self, best_side):
+        if np.allclose(best_side[0], np.array([0, 0, -1]), atol=abs(self.VECTOR_TOL)):
+            rotation_axis = [1, 0, 0]
+            phi = np.pi
+        elif np.allclose(best_side[0], np.array([0, 0, 1]), atol=abs(self.VECTOR_TOL)):
+            rotation_axis = [1, 0, 0]
             phi = 0
         else:
-            phi = float("{:2f}".format(math.pi - math.acos(-best_side[0][2])))
-            v = [-best_side[0][1], best_side[0][0], 0]
-            v = [i / math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) for i in v]
-            v = [float("{:2f}".format(i)) for i in v]
+            phi = np.pi - np.arccos(-best_side[0][2])
+            rotation_axis = [-best_side[0][1], best_side[0][0], 0]
+            rotation_axis = [i / np.linalg.norm(rotation_axis) for i in rotation_axis]
+        v = rotation_axis
+        rotational_matrix = np.array([[v[0] * v[0] * (1 - math.cos(phi)) + math.cos(phi),
+                                       v[0] * v[1] * (1 - math.cos(phi)) - v[2] * math.sin(phi),
+                                       v[0] * v[2] * (1 - math.cos(phi)) + v[1] * math.sin(phi)],
+                                      [v[1] * v[0] * (1 - math.cos(phi)) + v[2] * math.sin(phi),
+                                       v[1] * v[1] * (1 - math.cos(phi)) + math.cos(phi),
+                                       v[1] * v[2] * (1 - math.cos(phi)) - v[0] * math.sin(phi)],
+                                      [v[2] * v[0] * (1 - math.cos(phi)) - v[1] * math.sin(phi),
+                                       v[2] * v[1] * (1 - math.cos(phi)) + v[0] * math.sin(phi),
+                                       v[2] * v[2] * (1 - math.cos(phi)) + math.cos(phi)]], dtype=np.float64)
+        time.sleep(0)
+        return rotation_axis, phi, rotational_matrix
 
-        r = [[v[0] * v[0] * (1 - math.cos(phi)) + math.cos(phi),
-              v[0] * v[1] * (1 - math.cos(phi)) - v[2] * math.sin(phi),
-              v[0] * v[2] * (1 - math.cos(phi)) + v[1] * math.sin(phi)],
-             [v[1] * v[0] * (1 - math.cos(phi)) + v[2] * math.sin(phi),
-              v[1] * v[1] * (1 - math.cos(phi)) + math.cos(phi),
-              v[1] * v[2] * (1 - math.cos(phi)) - v[0] * math.sin(phi)],
-             [v[2] * v[0] * (1 - math.cos(phi)) - v[1] * math.sin(phi),
-              v[2] * v[1] * (1 - math.cos(phi)) + v[0] * math.sin(phi),
-              v[2] * v[2] * (1 - math.cos(phi)) + math.cos(phi)]]
-        r = [[float("{:2f}".format(val)) for val in row] for row in r]
-        return v, phi, r
+    @staticmethod
+    def remove_duplicates(old_orients):
+        alpha = 5
+        tol_angle = np.sin(alpha * np.pi / 180)
+        orientations = list()
+        for i in old_orients:
+            duplicate = None
+            for j in orientations:
+                if np.allclose(i[0], j[0], atol=tol_angle):
+                    duplicate = True
+                    break
+            if duplicate is None:
+                orientations.append(i)
+        return orientations

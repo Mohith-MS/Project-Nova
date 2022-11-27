@@ -1,2 +1,2 @@
 vtkplotlib>=2.0.0
-numpy-stl>=2.17.1
+numpy==1.23.5
