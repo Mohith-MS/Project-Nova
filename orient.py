@@ -72,23 +72,22 @@ class TakeFile:
                 mesh.append([face[0], face[1], face[2]])
                 face = []
 
-        mesh = map(self.calculate_normal, mesh)
-        tweaked = list("solid a\n")
+        asc_vert = list(map(lambda y: sorted(y, key=lambda o: o[2]), mesh))
+        asc_sorted = sorted(asc_vert, key=lambda p: p[0][2])
+        mesh = map(self.calculate_normal, asc_sorted)
         temp = list(map(self.write_facett, mesh))
-        for i in temp:
-            tweaked.append("   facet normal {} {} {}\n".format(i[0], i[1], i[2]))
-            tweaked.append("      outer loop\n")
-            tweaked.append("         vertex {} {} {}\n".format(i[3], i[4], i[5]))
-            tweaked.append("         vertex {} {} {}\n".format(i[6], i[7], i[8]))
-            tweaked.append("         vertex {} {} {}\n".format(i[9], i[10], i[11]))
-            tweaked.append("      endloop\n")
-            tweaked.append("   endfacet\n")
-        tweaked.append("endsolid")
-        tweaked = "".join(tweaked)
-        f = open("a.stl", 'w')
-        f.write(tweaked)
-        f.close()
-        return tweaked
+        # print("num ", len(temp))
+        flat = []
+        for x in temp:
+            flat += list(x)
+        self.write_stl(temp, 'a')
+        with open("Resources/temp/asc.txt", 'w') as in_file:
+            for i in flat:
+                in_file.write(str(i))
+                in_file.write("\n")
+        in_file.close()
+        # print("me",len(flat))
+        return flat  # , temp2
 
     @staticmethod
     def rotate_vert(content, r):
@@ -108,6 +107,23 @@ class TakeFile:
         return (facett[0][0], facett[0][1], facett[0][2], facett[1][0],
                 facett[1][1], facett[1][2], facett[2][0], facett[2][1],
                 facett[2][2], facett[3][0], facett[3][1], facett[3][2])
+
+    @staticmethod
+    def write_stl(coordinates, m):
+        file = list("solid a\n")
+        for i in coordinates:
+            file.append("   facet normal {} {} {}\n".format(i[0], i[1], i[2]))
+            file.append("      outer loop\n")
+            file.append("         vertex {} {} {}\n".format(i[3], i[4], i[5]))
+            file.append("         vertex {} {} {}\n".format(i[6], i[7], i[8]))
+            file.append("         vertex {} {} {}\n".format(i[9], i[10], i[11]))
+            file.append("      endloop\n")
+            file.append("   endfacet\n")
+        file.append("endsolid")
+        file = "".join(file)
+        f = open(f"Resources/temp/{m}.stl", 'w')
+        f.write(file)
+        f.close()
 
 
 class Tweak:
@@ -255,7 +271,7 @@ class Tweak:
         mesh[:, 5, 0] = mesh[:, 5, 0] / 2
 
         if self.NEGL_FACE_SIZE > 0:
-            negl_size = [0.1 * x if True else x for x in [self.NEGL_FACE_SIZE]][0]
+            negl_size = [0.1 * x for x in [self.NEGL_FACE_SIZE]][0]
             filtered_mesh = mesh[np.where(mesh[:, 5, 0] > negl_size)]
             if len(filtered_mesh) > 100:
                 mesh = filtered_mesh
