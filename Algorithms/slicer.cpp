@@ -5,6 +5,8 @@
 #include <vector>
 #include <thread>
 #include <chrono>
+#include <cstdlib>
+#include "Packages/Clipper2/CPP/Clipper2Lib/include/clipper2/clipper.h"
 using namespace std;
 
 bool close(double a, double b);
@@ -225,13 +227,15 @@ class Slice{
         double zValue;
         vector<Line> perimeter;
         bool isSurface;
+        vector<Triangle> filledArea;
         float layer_height;
 
         Slice(){}
-        Slice(double z, vector<Line> peri, bool surf, float h=0.1){//, double tant){
+        Slice(double z, vector<Line> peri, bool surf,vector<Triangle> filled, float h){//, double tant){
             zValue = z;
             perimeter = peri;
             isSurface = surf;
+            filledArea = filled;
             layer_height = h;
         }
 
@@ -240,7 +244,7 @@ class Slice{
             s += to_string(zValue);
             s += "\nSegments:\n";
             //return s;
-            /*
+
             for(int i=0; i < perimeter.size(); i++){
                 s += to_string(perimeter[i].p0.x) + " " + to_string(perimeter[i].p0.y) + " " + to_string(perimeter[i].p0.z);
                 s += " ";
@@ -249,7 +253,7 @@ class Slice{
             }
             s += "isSurface: ";
             s += to_string(isSurface);
-            s += "\n\n";*/
+            s += "\n\n";
             //s += to_string(minAngle);
             s += "\n\n";
             return s;
@@ -259,15 +263,18 @@ class Slice{
 vector<int> ten_per(vector<Triangle> triangles_asc, double current_z);
 
 int separateSlices(vector<Triangle> triangles_asc, vector<Slice> *seg, vector<double> slices){
-
+    ofstream mm("a.txt");
+//    m << shortlist[0].present();
     //vector<Slice> segments;
     //cout<<"Slicing model:"<<(bounds[1] - bounds[0])<<endl;
-
+    int p =0;
     //double total = bounds[1] - bounds[0];
     for (int i=0; i < slices.size(); i++){
         //cout<<i<<endl;
         vector<Line> currentSegment;
+        vector<Triangle> filledArea;
         bool currentSegmentSurface = false;
+        mm << i << endl;
         //cout<<"\r"<<(i / (numSlices+1))*100<<"%";
         vector<double> tant;
         //vector<int> ten = ten_per(triangles_asc, slices[i]);
@@ -277,6 +284,7 @@ int separateSlices(vector<Triangle> triangles_asc, vector<Slice> *seg, vector<do
             Point p1 = intersectSlice(Line(triangles_asc[m].p0, triangles_asc[m].p1), slices[i], &t1);
             Point p2 = intersectSlice(Line(triangles_asc[m].p1, triangles_asc[m].p2), slices[i], &t2);
             Point p3 = intersectSlice(Line(triangles_asc[m].p2, triangles_asc[m].p0), slices[i], &t3);
+            mm << "Points: " << p1.toString() << "\n"<<p2.toString()<<"\n"<<p3.toString()<<endl;
             //cout<<endl;
             vector<Point> points_ {p1,p2,p3};
             vector<double> tant_ {t1,t2,t3};
@@ -290,7 +298,12 @@ int separateSlices(vector<Triangle> triangles_asc, vector<Slice> *seg, vector<do
                     break;
                 }
             }
-
+             if (i == 0){
+                for(int o =0;o<points_.size();o++){
+                    mm<<o<<": "<<points_[o].toString()<<endl;
+                }
+//                mm << points_[<<endl;
+            }
             int k;
             for (int l=0; l<points_.size(); l++){
                 k = l + 1;
@@ -307,6 +320,13 @@ int separateSlices(vector<Triangle> triangles_asc, vector<Slice> *seg, vector<do
                 }
             }
 
+//            if (i==0) {
+//                for(int ii=0;ii<points.size();ii++){
+//                    mm<<p<<": "<<points[ii].toString()<<endl;
+//                    p++;
+//                }
+//            }
+//            mm <<"Size: " <<points.size()<<endl;
             if(points.size() == 2){
                 currentSegment.push_back(Line(points[0], points[1]));
             }
@@ -315,7 +335,10 @@ int separateSlices(vector<Triangle> triangles_asc, vector<Slice> *seg, vector<do
                 Line s2 = Line(points[1], points[2]);
                 Line s3 = Line(points[2], points[0]);
                 currentSegmentSurface = true;
-
+//                if (i==0){
+//                    mm << "Reached here"<<endl;
+//                }
+                filledArea.push_back(Triangle(points[0],points[1],points[2],Point(9999,9999,9999)));
                 currentSegment.push_back(s1);
                 currentSegment.push_back(s2);
                 currentSegment.push_back(s3);
@@ -345,9 +368,10 @@ int separateSlices(vector<Triangle> triangles_asc, vector<Slice> *seg, vector<do
         else{
             h = 0.3;
         }
-        (*seg).push_back(Slice(slices[i],currentSegment,currentSegmentSurface,h));//, mini));
+        (*seg).push_back(Slice(slices[i],currentSegment,currentSegmentSurface,filledArea,h));//, mini));
     }
     //*seg = segments;
+    mm.close();
     return 0;
 }
 
@@ -420,6 +444,7 @@ vector<double> slice2model(vector<Slice> slices){ //, vector<int> *shades){
     return ret_value;
 }
 
+// TODO add complete layer view
 void writeSliceData(vector<double> model){
 
     vector<string> data;
@@ -461,23 +486,23 @@ void writeSliceData(vector<double> model){
     }
     data.push_back("endsolid Adap");
     //cout<<"here"<<endl;
-    /*
-    vector<double> data;
-    for(int m=0;m<model.size();m+=9){
-        //data.push_back(((model[m+4] - model[m+1]) * (model[m+8] * model[m+2])) - ((model[m+5] - model[m+2]) * (model[m+7] - model[m+1])));
-        //data.push_back(((model[m+5] - model[m+2]) * (model[m+6] * model[m+0])) - ((model[m+3] - model[m+0]) * (model[m+8] - model[m+2])));
-        //data.push_back(((model[m+3] - model[m+0]) * (model[m+7] * model[m+1])) - ((model[m+3] - model[m+0]) * (model[m+8] - model[m+2])));
-        data.push_back(model[m]);
-        data.push_back(model[m+1]);
-        data.push_back(model[m+2]);
-        data.push_back(model[m+3]);
-        data.push_back(model[m+4]);
-        data.push_back(model[m+5]);
-        data.push_back(model[m+6]);
-        data.push_back(model[m+7]);
-        data.push_back(model[m+8]);
-    }
-    */
+
+//    vector<double> data;
+//    for(int m=0;m<model.size();m+=9){
+//        //data.push_back(((model[m+4] - model[m+1]) * (model[m+8] * model[m+2])) - ((model[m+5] - model[m+2]) * (model[m+7] - model[m+1])));
+//        //data.push_back(((model[m+5] - model[m+2]) * (model[m+6] * model[m+0])) - ((model[m+3] - model[m+0]) * (model[m+8] - model[m+2])));
+//        //data.push_back(((model[m+3] - model[m+0]) * (model[m+7] * model[m+1])) - ((model[m+3] - model[m+0]) * (model[m+8] - model[m+2])));
+//        data.push_back(model[m]);
+//        data.push_back(model[m+1]);
+//        data.push_back(model[m+2]);
+//        data.push_back(model[m+3]);
+//        data.push_back(model[m+4]);
+//        data.push_back(model[m+5]);
+//        data.push_back(model[m+6]);
+//        data.push_back(model[m+7]);
+//        data.push_back(model[m+8]);
+//    }
+
     ofstream filee;
     filee.open("Resources/temp/adap.stl", ios::out | ios::trunc);;
     //file.open
@@ -525,10 +550,10 @@ Slice cleanPerimeter(Slice segments){
         }
         i += 1;
     }
-    return Slice(segments.zValue,setPerimeter,segments.isSurface);
+    return Slice(segments.zValue,setPerimeter,segments.isSurface,segments.filledArea,segments.layer_height);
 }
 
-
+// TODO remove
 vector<double> shift2origin(vector<double> coords){
     double temp = 99999999;
     //For X:
@@ -578,6 +603,12 @@ vector<double> shift2origin(vector<double> coords){
 }
 
 int main(){
+    fstream MyFile;
+    MyFile.open("Resources/temp/nozzleDiameter.tmp", ios::in);
+    string nozzleDiameter;
+    MyFile >> nozzleDiameter;
+    MyFile.close();
+    float nozzleDia = stod(nozzleDiameter);
     vector<double> fileData = readFile();
     vector<double> shifted = shift2origin(fileData);
     //cout<<"shifted"<<endl;
@@ -587,9 +618,9 @@ int main(){
     vector<Slice> segments2;
     vector<Slice> segments3;
     vector<Slice> segments4;
-    //vector<Slice> segments5;
+    vector<Slice> segments5;
     vector<double> bounds = findBoundaries(triangles);
-    int numSlices = (int)((bounds[1] - bounds[0]) / 0.1);
+    int numSlices = (int)((bounds[1] - bounds[0]) / (nozzleDia/4));
     //cout<<"NUm "<<numSlices<<endl;
     vector<double> slices1;
     vector<double> slices2;
@@ -597,46 +628,49 @@ int main(){
     vector<double> slices4;
     vector<double> slices5;
     for(int i=0; i<(int)numSlices*0.25; i++){
-        slices1.push_back(bounds[0] + i*0.1);
+        slices1.push_back(bounds[0] + i*(nozzleDia/4));
     }
     for(int i=(int)numSlices*0.25; i<(int)numSlices*0.5; i++){
-        slices2.push_back(bounds[0] + i*0.1);
+        slices2.push_back(bounds[0] + i*(nozzleDia/4));
     }
     for(int i=(int)numSlices*0.5; i<(int)numSlices*0.75; i++){
-        slices3.push_back(bounds[0] + i*0.1);
+        slices3.push_back(bounds[0] + i*(nozzleDia/4));
     }
     for(int i=(int)numSlices*0.75; i<(int)numSlices; i++){
-        slices4.push_back(bounds[0] + i*0.1);
-    }/*
+        slices4.push_back(bounds[0] + i*(nozzleDia/4));
+    }
     for(int i=(int)numSlices*0.8; i<(int)numSlices; i++){
         slices5.push_back(bounds[0] + i*0.1);
-    }*/
+    }
     //cout<<"Started slicing"<<endl;
+//    ofstream asdf("asdf.txt");
+//    asdf <<triangles[0].toString()<<endl;
+//    asdf.close();
     thread t1(separateSlices,triangles,&segments1,slices1);
     thread t2(separateSlices,triangles,&segments2,slices2);
     thread t3(separateSlices,triangles,&segments3,slices3);
     thread t4(separateSlices,triangles,&segments4,slices4);
-    //thread t5(separateSlices,triangles,&segments5,slices5);
+    thread t5(separateSlices,triangles,&segments5,slices5);
     t1.join();
     t2.join();
     t3.join();
     t4.join();
-    //t5.join();
-    //vector<Slice> segments {separateSlices(triangles)};
-    /*vector<Slice> segmentsC;
+    t5.join();
+    vector<Slice> segments {separateSlices(triangles)};
+    vector<Slice> segmentsC;
     for (int i =0;i < segments.size();i++){
         segmentsC.push_back(cleanPerimeter(segments[i]));
     }
     //segments = cleanPerimeter(segments);*/
-    //cout<<"Sliced"<<endl;
+//    cout<<"Sliced"<<endl;
     vector<Slice> segments;
-    //separateSlices(triangles,&segments);
+    separateSlices(triangles,&segments);
     segments.reserve(segments1.size()*4);
     segments.insert(segments.end(), segments1.begin(), segments1.end());
     segments.insert(segments.end(), segments2.begin(), segments2.end());
     segments.insert(segments.end(), segments3.begin(), segments3.end());
     segments.insert(segments.end(), segments4.begin(), segments4.end());
-    //segments.insert(segments.end(), segments5.begin(), segments5.end());
+    segments.insert(segments.end(), segments5.begin(), segments5.end());
     int i = 0;
     vector<Slice> shortlist;
 
@@ -664,6 +698,7 @@ int main(){
         }
     }
 
+    // TODO pick off from shortlist and build layer details
     //vector<int> shades;
     vector<double> model = slice2model(shortlist); //, &shades);
     /*
